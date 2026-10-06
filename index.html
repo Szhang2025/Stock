@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Tech Stocks</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{--bg:#0f1720;--panel:#17212d;--line:#263445;--text:#e8eef5;--mute:#8da0b5;--up:#4cc9a0;--down:#ff7a6b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 "Avenir Next","Segoe UI",system-ui,sans-serif;padding:16px;max-width:1100px;margin-inline:auto}
+h1{font-size:1.5rem;margin:0 0 2px;letter-spacing:-.01em}
+.sub{color:var(--mute);margin:0 0 16px;font-size:.9rem}
+.status{display:inline-flex;gap:6px;align-items:center;font-size:.85rem;color:var(--mute)}
+.dot{width:8px;height:8px;border-radius:50%;background:#667}
+.dot.on{background:var(--up)}
+#setup{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+#setup p{margin:0 0 10px;color:var(--mute)}
+#setup a{color:#7cb7ff}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+input{flex:1;min-width:200px;background:var(--bg);border:1px solid var(--line);color:var(--text);padding:10px;border-radius:8px;font:inherit}
+button{background:#7cb7ff;color:#0b1520;border:0;border-radius:8px;padding:10px 16px;font:inherit;font-weight:600;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid #fff;outline-offset:2px}
+button.ghost{background:transparent;color:var(--mute);border:1px solid var(--line);font-weight:400;padding:4px 10px}
+#cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--c);border-radius:8px;padding:10px 12px;cursor:pointer;text-align:left;color:var(--text);font:inherit;width:100%}
+.card.off{opacity:.4}
+.sym{font-weight:700}
+.px{font-size:1.35rem;font-variant-numeric:tabular-nums}
+.chg{font-size:.85rem;font-variant-numeric:tabular-nums}
+.up{color:var(--up)}.down{color:var(--down)}
+.chart{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;height:min(60vh,460px)}
+.note{color:var(--mute);font-size:.82rem;margin-top:10px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="top">
+  <div>
+    <h1>Live tech stocks</h1>
+    <p class="sub">Change since previous close, updated with each trade.</p>
+  </div>
+  <div class="status"><span class="dot" id="dot"></span><span id="status">Not connected</span>
+    <button class="ghost" id="reset" hidden>Change key</button></div>
+</div>
+
+<div id="setup">
+  <p>This page reads real market data from Finnhub. Paste a free API key (<a href="https://finnhub.io/register" target="_blank" rel="noopener">get one here</a>). It stays in this browser only.</p>
+  <div class="row"><input id="key" placeholder="Finnhub API key" autocomplete="off"><button id="go">Start live feed</button></div>
+</div>
+
+<div id="cards"></div>
+<div class="chart"><canvas id="c" aria-label="Live percent change chart" role="img"></canvas></div>
+<p class="note" id="note"></p>
+
+<script>
+const SYMS=["AAPL","MSFT","NVDA","GOOGL","AMZN","META","TSLA"];
+const COL=["#7cb7ff","#4cc9a0","#ffd166","#ff7a6b","#c792ea","#5eead4","#f78fb3"];
+const S={};SYMS.forEach((s,i)=>S[s]={pc:null,last:null,color:COL[i],data:[],off:false});
+let ws,key,dirty=false,lastMsg=0;
+
+const $=id=>document.getElementById(id);
+const get=()=>{try{return localStorage.getItem("fh_key")}catch(e){return null}};
+const put=v=>{try{v?localStorage.setItem("fh_key",v):localStorage.removeItem("fh_key")}catch(e){}};
+
+const chart=new Chart($("c"),{type:"line",
+ data:{datasets:SYMS.map(s=>({label:s,data:S[s].data,borderColor:S[s].color,backgroundColor:S[s].color,borderWidth:2,pointRadius:0,tension:0,stepped:false}))},
+ options:{animation:false,responsive:true,maintainAspectRatio:false,parsing:false,
+  interaction:{mode:"nearest",axis:"x",intersect:false},
+  plugins:{legend:{labels:{color:"#8da0b5"}},tooltip:{callbacks:{label:c=>c.dataset.label+": "+c.parsed.y.toFixed(2)+"%"}}},
+  scales:{x:{type:"linear",ticks:{color:"#8da0b5",maxTicksLimit:6,callback:v=>new Date(v).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"})},grid:{color:"#263445"}},
+   y:{ticks:{color:"#8da0b5",callback:v=>v.toFixed(1)+"%"},grid:{color:"#263445"}}}}});
+
+function drawCards(){
+ $("cards").innerHTML=SYMS.map(s=>{const d=S[s],p=d.last,pct=(p!=null&&d.pc)?(p/d.pc-1)*100:null,diff=(p!=null&&d.pc)?p-d.pc:null,cls=pct>=0?"up":"down";
+ return `<button class="card ${d.off?"off":""}" style="--c:${d.color}" data-s="${s}" aria-pressed="${!d.off}"><div class="sym">${s}</div><div class="px">${p!=null?p.toFixed(2):"…"}</div><div class="chg ${pct!=null?cls:""}">${pct!=null?(diff>=0?"+":"")+diff.toFixed(2)+" ("+(pct>=0?"+":"")+pct.toFixed(2)+"%)":"loading"}</div></button>`}).join("");
+}
+$("cards").addEventListener("click",e=>{const b=e.target.closest(".card");if(!b)return;const s=b.dataset.s;S[s].off=!S[s].off;chart.setDatasetVisibility(SYMS.indexOf(s),!S[s].off);chart.update();drawCards()});
+
+function addPoint(s,price,t){
+ const d=S[s];if(!d.pc||price==null)return;
+ d.last=price;
+ const x=t||Date.now(),y=(price/d.pc-1)*100,a=d.data;
+ if(a.length&&x<=a[a.length-1].x)return;
+ a.push({x,y});if(a.length>3000)a.shift();dirty=true;
+}
+setInterval(()=>{if(dirty){dirty=false;chart.update();drawCards()}},1000);
+
+async function quote(s){
+ const r=await fetch(`https://finnhub.io/api/v1/quote?symbol=${s}&token=${key}`);
+ if(r.status===401||r.status===403)throw new Error("auth");
+ if(!r.ok)throw new Error("http "+r.status);
+ return r.json();
+}
+async function pollQuotes(){
+ for(const s of SYMS){try{const q=await quote(s);if(q.pc)S[s].pc=q.pc;if(q.c)addPoint(s,q.c,q.t?q.t*1000:null)}catch(e){if(e.message==="auth"){fail("Key rejected. Check it and try again.");return}}}
+ drawCards();chart.update();
+}
+function status(on,txt){$("dot").className="dot"+(on?" on":"");$("status").textContent=txt}
+function fail(m){status(false,m);$("setup").hidden=false;$("reset").hidden=true;put(null)}
+
+function connect(){
+ ws=new WebSocket("wss://ws.finnhub.io?token="+key);
+ ws.onopen=()=>{status(true,"Live");SYMS.forEach(s=>ws.send(JSON.stringify({type:"subscribe",symbol:s})))};
+ ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type!=="trade")return;lastMsg=Date.now();
+  const latest={};m.data.forEach(t=>{if(!latest[t.s]||t.t>latest[t.s].t)latest[t.s]=t});
+  Object.values(latest).forEach(t=>addPoint(t.s,t.p,t.t))};
+ ws.onclose=()=>{status(false,"Reconnecting…");setTimeout(()=>key&&connect(),3000)};
+ ws.onerror=()=>ws.close();
+}
+async function start(k){
+ key=k.trim();if(!key)return;put(key);
+ $("setup").hidden=true;$("reset").hidden=false;status(false,"Connecting…");
+ await pollQuotes();
+ if(!key)return;
+ connect();
+ setInterval(pollQuotes,30000);
+ $("note").textContent="Prices come from Finnhub. When US markets are closed, the chart shows the last trade and moves again at the next open. Tap a ticker to hide or show its line.";
+}
+$("go").onclick=()=>start($("key").value);
+$("key").addEventListener("keydown",e=>{if(e.key==="Enter")start($("key").value)});
+$("reset").onclick=()=>{put(null);location.reload()};
+drawCards();
+const saved=get();if(saved)start(saved);
+</script>
+</body>
+</html>
