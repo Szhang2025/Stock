@@ -93,8 +93,11 @@ async function quote(s){
  return r.json();
 }
 async function pollQuotes(){
- for(const s of SYMS){try{const q=await quote(s);if(q.pc)S[s].pc=q.pc;if(q.c)addPoint(s,q.c,q.t?q.t*1000:null)}catch(e){if(e.message==="auth"){fail("Key rejected. Check it and try again.");return}}}
+ let ok=0,err="";
+ for(const s of SYMS){try{const q=await quote(s);if(q.pc)S[s].pc=q.pc;if(q.c)addPoint(s,q.c,q.t?q.t*1000:null);ok++}catch(e){if(e.message==="auth"){fail("Key rejected. Check it and try again.");return false}err=e.message}}
  drawCards();chart.update();
+ if(!ok){status(false,"Can't reach Finnhub ("+err+")");$("note").textContent="No data came back. If you opened this inside a preview or in-app viewer, open the file in Safari or Chrome instead. Also check the key and your connection.";return false}
+ return true;
 }
 function status(on,txt){$("dot").className="dot"+(on?" on":"");$("status").textContent=txt}
 function fail(m){status(false,m);$("setup").hidden=false;$("reset").hidden=true;put(null)}
@@ -111,8 +114,8 @@ function connect(){
 async function start(k){
  key=k.trim();if(!key)return;put(key);
  $("setup").hidden=true;$("reset").hidden=false;status(false,"Connecting…");
- await pollQuotes();
- if(!key)return;
+ const good=await pollQuotes();
+ if(!key||good===false&&!S.AAPL.pc){$("setup").hidden=false;return}
  connect();
  setInterval(pollQuotes,30000);
  $("note").textContent="Prices come from Finnhub. When US markets are closed, the chart shows the last trade and moves again at the next open. Tap a ticker to hide or show its line.";
